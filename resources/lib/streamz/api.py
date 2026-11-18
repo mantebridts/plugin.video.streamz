@@ -360,6 +360,13 @@ class Api:
             items.extend(self._parse_teaser(item) for item in category.get('teasers', []))
         return [item for item in items if item]
 
+    @staticmethod
+    def _text(value):
+        """ Return the text of a field that is either a string or a {"label": ...} object. """
+        if isinstance(value, dict):
+            value = value.get('label')
+        return value if isinstance(value, str) and value.strip() else None
+
     def _parse_teaser(self, item, cache=CACHE_ONLY):
         """ Parse a teaser. When the detail page is cached we know if it is a Movie or a Program,
         otherwise we return a Teaser that resolves the type when opened. Teasers that point to a
@@ -373,17 +380,23 @@ class Api:
         if not detail_id:
             return None
 
-        name = item.get('title')
+        name = self._text(item.get('title'))
         thumb = item.get('imageUrl') or item.get('landscapeImageUrl') or item.get('largeImageUrl')
         fanart = item.get('heroImageUrl') or thumb
 
         if item.get('playableId'):
             progress = item.get('userProgressPercentage') or 0
+            if not name:
+                # "Continue watching" teasers can come without a text title: take it from the detail page
+                detail = self.get_detail(detail_id, cache=CACHE_AUTO)
+                name = detail.name if detail else None
+            if not name:
+                return None
             return Episode(
                 episode_id=item.get('playableId'),
                 program_id=detail_id,
                 program_name=name,
-                name=item.get('seasonLabel') or name,
+                name=self._text(item.get('seasonLabel')) or name,
                 description=item.get('description'),
                 thumb=thumb,
                 fanart=fanart,
@@ -393,6 +406,10 @@ class Api:
         detail = self.get_detail(detail_id, cache=cache)
         if detail:
             return detail
+
+        if not name:
+            # No text title and nothing cached: fetch the detail page instead of showing a nameless item
+            return self.get_detail(detail_id, cache=CACHE_AUTO)
 
         return Teaser(
             detail_id=detail_id,
